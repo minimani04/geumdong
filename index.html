@@ -122,10 +122,10 @@
 
 <!-- 탭 -->
 <div class="tabs">
-  <button class="tab-btn active" onclick="switchTab('upload')">📸 사진 분석</button>
-  <button class="tab-btn" onclick="switchTab('results')" id="tab-results">📋 결과 (<span id="result-count">0</span>)</button>
-  <button class="tab-btn" onclick="switchTab('chat')">🐾 금동아</button>
-  <button class="tab-btn" onclick="switchTab('settings')">⚙️ 설정</button>
+  <button class="tab-btn active" onclick="switchTab('upload', this)">📸 사진 분석</button>
+  <button class="tab-btn" onclick="switchTab('results', this)" id="tab-btn-results">📋 결과 (<span id="result-count">0</span>)</button>
+  <button class="tab-btn" onclick="switchTab('chat', this)">🐾 금동아</button>
+  <button class="tab-btn" onclick="switchTab('settings', this)">⚙️ 설정</button>
 </div>
 
 <!-- 컨텐츠 -->
@@ -172,6 +172,7 @@
     <div id="dl-btns" style="display:none; margin-top:16px;">
       <button class="btn" onclick="downloadExcel()">📊 Excel 다운로드</button>
       <button class="btn btn-outline" onclick="downloadWord()" style="margin-top:8px;">📄 Word 다운로드</button>
+      <button class="btn btn-outline" onclick="clearResults()" style="margin-top:8px; border-color:#ffaaaa; color:#cc4444;">🗑️ 결과 전체 삭제</button>
     </div>
   </div>
 
@@ -233,6 +234,12 @@ let chatHistory = [];
 
 // ─── 초기화 ───
 function init() {
+  loadResults();
+  if (results.length > 0) {
+    document.getElementById('result-count').textContent = results.length;
+    document.getElementById('total-count').textContent = results.length + '건';
+    renderResults();
+  }
   if (apiKey) {
     document.getElementById('apikey-input').value = apiKey;
     document.getElementById('api-status').textContent = '✅ 설정됨';
@@ -243,11 +250,11 @@ function init() {
 }
 
 // ─── 탭 전환 ───
-function switchTab(name) {
-  document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
-  document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+function switchTab(name, el) {
+  document.querySelectorAll('.tab-content').forEach(e => e.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(e => e.classList.remove('active'));
   document.getElementById('tab-' + name).classList.add('active');
-  event.target.classList.add('active');
+  if (el) el.classList.add('active');
 }
 
 // ─── API 저장 ───
@@ -330,14 +337,23 @@ function speak(text) {
 async function callClaude(messages, system) {
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
-    headers: {'Content-Type':'application/json'},
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true'
+    },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-opus-4-5',
       max_tokens: 1000,
       system,
       messages
     })
   });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err?.error?.message || `API 오류 (${res.status})`);
+  }
   const data = await res.json();
   return data.content?.[0]?.text || '오류가 발생했어요';
 }
@@ -383,10 +399,12 @@ async function analyzeAll() {
 
   images = [];
   renderPreviews();
+  updateAnalyzeBtn();
   document.getElementById('loading').style.display = 'none';
   document.getElementById('analyze-btn').disabled = false;
   document.getElementById('result-count').textContent = results.length;
   document.getElementById('total-count').textContent = results.length + '건';
+  saveResults();
   renderResults();
   speak('금동동! 분석 완료됐어요!');
   switchTabDirect('results');
@@ -397,7 +415,19 @@ function switchTabDirect(name) {
   document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
   document.getElementById('tab-' + name).classList.add('active');
   const idx = {'upload':0,'results':1,'chat':2,'settings':3}[name];
-  document.querySelectorAll('.tab-btn')[idx].classList.add('active');
+  const btns = document.querySelectorAll('.tab-btn');
+  if (btns[idx]) btns[idx].classList.add('active');
+}
+
+function saveResults() {
+  try { localStorage.setItem('geumdong_results', JSON.stringify(results)); } catch(e) {}
+}
+
+function loadResults() {
+  try {
+    const saved = localStorage.getItem('geumdong_results');
+    if (saved) results = JSON.parse(saved);
+  } catch(e) { results = []; }
 }
 
 function parseResult(text) {
@@ -417,6 +447,15 @@ function parseResult(text) {
     신뢰도: get('신뢰도'),
     코멘트: get('금동이코멘트') || '금동동! 분석 완료예요 🐾'
   };
+}
+
+function clearResults() {
+  if (!confirm('결과를 전체 삭제할까요?')) return;
+  results = [];
+  localStorage.removeItem('geumdong_results');
+  document.getElementById('result-count').textContent = '0';
+  document.getElementById('total-count').textContent = '0건';
+  renderResults();
 }
 
 function renderResults() {
